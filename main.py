@@ -9,7 +9,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 # --- CONFIGURAÇÕES ---
-ID_INICIAL = 1000
+ID_INICIAL = 1
 NOME_PLANILHA = "Fluxo Caixa Monitor"  # Tem que ser IDÊNTICO ao nome no Google Sheets
 ARQUIVO_CREDENCIAIS = "credentials.json"
 
