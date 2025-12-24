@@ -10,14 +10,14 @@ from datetime import datetime
 
 # --- CONFIGURAÇÕES ---
 ID_INICIAL = 1
-NOME_PLANILHA = "Fluxo Caixa Monitor"  # Tem que ser IDÊNTICO ao nome no Google Sheets
+NOME_PLANILHA = "monitor_depositos"  # <--- ATUALIZADO AQUI
 ARQUIVO_CREDENCIAIS = "credentials.json"
 
-# COOKIES (Mantenha atualizado!)
+# ⚠️ ATENÇÃO: Atualize os cookies se o login cair
 COOKIES = {
     'authi': 'a8fb903cf884f7552b8e5d858652e3d2',
     'PHPSESSID': 'dnb8poau59t7hk2nnnu3vg196b',
-    'email': 'seu_email%40gmail.com'
+    'email': 'seu_email_aqui%40gmail.com'
 }
 
 HEADERS = {
@@ -30,10 +30,11 @@ def conectar_sheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name(ARQUIVO_CREDENCIAIS, scope)
     client = gspread.authorize(creds)
+    # Abre a planilha pelo nome exato
     sheet = client.open(NOME_PLANILHA).sheet1
     return sheet
 
-# --- FUNÇÕES DE DECODIFICAÇÃO (IGUAIS AO ANTERIOR) ---
+# --- FUNÇÕES DE DECODIFICAÇÃO ---
 def decodificar_jws_valor(token_jws):
     try:
         if '.' not in token_jws: return "Erro Token", "N/A"
@@ -41,14 +42,17 @@ def decodificar_jws_valor(token_jws):
         padding = len(payload_b64) % 4
         if padding > 0: payload_b64 += "=" * (4 - padding)
         dados = json.loads(base64.urlsafe_b64decode(payload_b64).decode('utf-8'))
-        return dados.get('valor', {}).get('original', '0.00'), dados.get('chave', 'N/A')
-    except Exception as e: return f"Erro: {e}", "N/A"
+        val = dados.get('valor', {}).get('original', '0.00')
+        chave = dados.get('chave', 'N/A')
+        return val, chave
+    except Exception as e: return f"Erro: {str(e)}", "N/A"
 
 def buscar_valor_real(user_id):
     url_view = f"https://acebroker.io/traderoom/payin/3/{user_id}"
     try:
         r = requests.get(url_view, cookies=COOKIES, headers=HEADERS)
-        # Regex UUID corrigido
+        
+        # Regex para UUID (formato novo do Pix)
         regex_uuid = r'(pix\.onlyup\.com\.br\/qr\/v3\/at\/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})'
         match = re.search(regex_uuid, r.text)
         
@@ -59,7 +63,7 @@ def buscar_valor_real(user_id):
             if "Error" in token or "<html" in token: return "Erro Gateway", "N/A", gateway_url
             return decodificar_jws_valor(token) + (gateway_url,)
         
-        # Fallback
+        # Fallback (formato antigo)
         fallback = re.search(r'(pix\.onlyup\.com\.br\/qr\/v3\/at\/[a-zA-Z0-9\-]+)', r.text)
         if fallback:
             gateway_url = f"https://{fallback.group(1).split('5204')[0]}"
@@ -75,12 +79,14 @@ def iniciar_monitoramento():
     print("🔌 Conectando ao Google Sheets...")
     try:
         sheet = conectar_sheets()
-        # Adiciona cabeçalho se a planilha estiver vazia
+        # Se a planilha estiver vazia, cria o cabeçalho
         if not sheet.get_all_values():
             sheet.append_row(['Data Hora', 'ID', 'Status', 'VALOR REAL (R$)', 'Recebedor', 'Msg', 'Link'])
-        print("✅ Conectado com Sucesso!")
+        print(f"✅ Conectado na planilha: {NOME_PLANILHA}")
     except Exception as e:
-        print(f"❌ Erro ao conectar no Sheets: {e}")
+        print(f"❌ Erro Crítico ao conectar no Sheets: {e}")
+        print("   -> Verifique se o nome da planilha no Google está IGUAL: 'monitor_depositos'")
+        print("   -> Verifique se você compartilhou a planilha com o email do credentials.json")
         return
 
     current_id = ID_INICIAL
@@ -105,7 +111,6 @@ def iniciar_monitoramento():
                 
                 print(f"💰 ID {current_id} | {status_text} | R$ {val_real}")
                 
-                # --- ENVIA PARA O GOOGLE SHEETS ---
                 try:
                     sheet.append_row([
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -113,23 +118,22 @@ def iniciar_monitoramento():
                     ])
                 except Exception as e_sheet:
                     print(f"⚠️ Erro ao salvar no Sheets (Tentando reconectar): {e_sheet}")
-                    # Tenta reconectar e salvar de novo
                     try:
                         sheet = conectar_sheets()
                         sheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), current_id, status_text, val_real, recebedor, data.get("msg", ""), link])
                     except:
-                        print("❌ Falha crítica ao salvar linha.")
+                        pass
 
                 current_id += 1
                 
             elif status_code == "erro":
                 print(f"💤 Aguardando... (ID {current_id})", end='\r')
                 time.sleep(10)
-                continue # Tenta o mesmo ID de novo
+                continue 
             else:
                 current_id += 1
 
-            time.sleep(1) # Respeita o limite da API do Google
+            time.sleep(1)
 
         except Exception as e:
             print(f"❌ Erro Loop: {e}")
