@@ -7,6 +7,10 @@ import os
 from datetime import datetime
 from supabase import create_client, Client
 
+# Pega as chaves que você configurou no Railway
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
 # --- CONFIGURAÇÕES ---
 ID_INICIAL = 1
 NOME_PLANILHA = "monitor_depositos"  # <--- ATUALIZADO AQUI
