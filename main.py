@@ -15,9 +15,9 @@ ARQUIVO_CREDENCIAIS = "credentials.json"
 
 # ⚠️ ATENÇÃO: Atualize os cookies se o login cair
 COOKIES = {
-    'authi': 'a8fb903cf884f7552b8e5d858652e3d2',
-    'PHPSESSID': 'dnb8poau59t7hk2nnnu3vg196b',
-    'email': 'seu_email_aqui%40gmail.com'
+    'authi': '2440b5dcbbe40cc7140ad9830c0d62b5',
+    'PHPSESSID': 'fentmnq0rrc4lf60frjij113h7',
+    'email': 'alberto0codug%40gmail.com'
 }
 
 HEADERS = {
