@@ -7,6 +7,7 @@ import os
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from supabase import create_client, Client
 
 # --- CONFIGURAÇÕES ---
 ID_INICIAL = 1
