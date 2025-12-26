@@ -15,7 +15,7 @@ QTD_RETROVISOR = 5  # Quantos IDs para trás ele vai verificar
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-# ⚠️ COOKIES (Mantidos os que você enviou)
+# ⚠️ ATENÇÃO: Seus Cookies
 COOKIES = {
     'authi': '2440b5dcbbe40cc7140ad9830c0d62b5',
     'PHPSESSID': 'fentmnq0rrc4lf60frjij113h7',
@@ -58,7 +58,6 @@ def buscar_valor_real(user_id):
     try:
         r = requests.get(url_view, cookies=COOKIES, headers=HEADERS)
         
-        # Regex UUID
         regex_uuid = r'(pix\.onlyup\.com\.br\/qr\/v3\/at\/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})'
         match = re.search(regex_uuid, r.text)
         
@@ -67,7 +66,6 @@ def buscar_valor_real(user_id):
         if match:
             gateway_url = f"https://{match.group(1)}"
         else:
-            # Fallback
             fallback = re.search(r'(pix\.onlyup\.com\.br\/qr\/v3\/at\/[a-zA-Z0-9\-]+)', r.text)
             if fallback:
                 raw = fallback.group(1).split('5204')[0]
@@ -89,14 +87,15 @@ def buscar_valor_real(user_id):
     
     return 0.0, "N/A", ""
 
-# --- NOVA FUNÇÃO: O RETROVISOR ---
+# --- O RETROVISOR (CORRIGIDO) ---
 def revisar_ids_anteriores(id_atual, supabase):
     """
-    Volta X casas para trás e verifica se o status mudou (ex: de Pendente para Pago).
+    Volta X casas. Se o status virou 1, atualiza APENAS o status no banco,
+    sem tentar ler o valor de novo (pois o link pode ter expirado).
     """
-    start = max(1, id_atual - QTD_RETROVISOR) # Garante que não busca ID negativo
-    print(f"   ↪️  Revisando IDs anteriores: {start} até {id_atual - 1}...")
-
+    start = max(1, id_atual - QTD_RETROVISOR)
+    
+    # Loop silencioso para não poluir log, só avisa se atualizar algo
     for check_id in range(start, id_atual):
         try:
             url_check = f"https://acebroker.io/traderoom/payin/checar/{check_id}"
@@ -104,28 +103,29 @@ def revisar_ids_anteriores(id_atual, supabase):
             data = resp.json()
             status_code = str(data.get("status", ""))
 
-            # Se for status 1 (PAGO), a gente força a atualização no banco
+            # Se descobrimos que agora está PAGO (1)
             if status_code == "1":
-                print(f"      ✨ ATUALIZAÇÃO: ID {check_id} agora está PAGO! Salvando...")
+                # Verifica no banco se JÁ estava pago para não gastar update a toa
+                # (Opcional, mas economiza recurso. Aqui vamos direto pro update)
                 
-                # Busca os dados completos novamente para garantir
-                val_real, recebedor, link = buscar_valor_real(check_id)
+                print(f"      ✨ RETROVISOR: ID {check_id} pagou! Atualizando status (mantendo valor)...")
+                
+                # --- AQUI ESTÁ A CORREÇÃO ---
+                # NÃO chamamos buscar_valor_real().
+                # Usamos .update() em vez de .upsert() para alterar SÓ o status.
                 
                 dados_update = {
-                    "id": check_id,
-                    "status": "PAGO", # Atualiza status
-                    "valor_real": val_real,
-                    "recebedor": recebedor,
-                    "msg_sistema": data.get("msg", ""),
-                    "link_gateway": link
+                    "status": "PAGO",
+                    "msg_sistema": data.get("msg", "")
                 }
-                supabase.table("depositos").upsert(dados_update).execute()
+                
+                # Comando: Atualize 'dados_update' ONDE 'id' é igual a 'check_id'
+                supabase.table("depositos").update(dados_update).eq("id", check_id).execute()
             
-            # Pequeno delay para não sobrecarregar
-            time.sleep(0.2)
+            time.sleep(0.1)
 
         except Exception as e:
-            pass # Se der erro na revisão, apenas ignora e segue
+            pass 
 
 # --- LOOP PRINCIPAL ---
 def iniciar_monitoramento():
@@ -135,7 +135,6 @@ def iniciar_monitoramento():
 
     current_id = ID_INICIAL
     
-    # Tenta continuar de onde parou
     try:
         response = supabase.table("depositos").select("id").order("id", desc=True).limit(1).execute()
         if response.data and len(response.data) > 0:
@@ -148,7 +147,7 @@ def iniciar_monitoramento():
 
     while True:
         try:
-            # 1. Verifica ID Atual (O Futuro)
+            # 1. Verifica ID Atual
             url_check = f"https://acebroker.io/traderoom/payin/checar/{current_id}"
             resp = requests.post(url_check, cookies=COOKIES, headers=HEADERS)
             
@@ -160,9 +159,11 @@ def iniciar_monitoramento():
 
             status_code = str(data.get("status", ""))
             
-            # SE EXISTE (Novo Depósito Encontrado)
+            # SE EXISTE (Novo Depósito)
             if status_code in ["0", "1"]:
                 status_text = "PAGO" if status_code == "1" else "PENDENTE"
+                
+                # Busca o valor COMPLETO (porque é a primeira vez que vemos esse ID)
                 val_real, recebedor, link = buscar_valor_real(current_id)
                 
                 print(f"💰 ID {current_id} | {status_text} | R$ {val_real}")
@@ -181,18 +182,16 @@ def iniciar_monitoramento():
                 except Exception as e_db:
                     print(f"❌ Erro ao salvar: {e_db}")
 
-                # --- AQUI ESTÁ A MÁGICA: REVISÃO ---
-                # Depois de processar um ID com sucesso, revisa os anteriores
+                # Chama o retrovisor para checar os passados
                 revisar_ids_anteriores(current_id, supabase)
                 
                 current_id += 1
                 
-            # SE AINDA NÃO EXISTE (Fim da fila)
+            # SE AINDA NÃO EXISTE
             elif status_code == "erro":
                 print(f"💤 Aguardando novo depósito... (ID {current_id})", end='\r')
                 
-                # DICA: Enquanto espera o novo, revisa os antigos também!
-                # Isso garante que se o site estiver parado, a gente continua checando pagamentos.
+                # Enquanto espera, revisa os antigos para garantir atualizações rápidas
                 revisar_ids_anteriores(current_id, supabase)
                 
                 time.sleep(5) 
